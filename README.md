@@ -69,11 +69,11 @@ You have two PAT formats to choose from. Fine-grained is preferred (least privil
    | Pull requests    | Read and write | Open PRs, enable auto-merge              |
    | Metadata         | Read-only      | (auto-included)                          |
 
-7. **Account permissions** — set this to **Read and write**:
+7. **Account permissions** — under *Add permissions*, add **Copilot Requests** (Read-only is the only option):
 
-   | Permission        | Access         | Why                                       |
-   |-------------------|----------------|-------------------------------------------|
-   | Copilot Requests  | Read and write | Copilot CLI in stage 03 needs this        |
+   | Permission        | Access      | Why                                       |
+   |-------------------|-------------|-------------------------------------------|
+   | Copilot Requests  | Read-only   | Copilot CLI in stage 03 needs this        |
 
 8. Generate the token. **Copy it immediately** — you won't see it again.
 
