@@ -120,7 +120,7 @@ The implementation stage runs Copilot CLI in-runner, which accepts `--model` nat
 ## Repo settings checklist
 
 - [x] `COPILOT_USER_PAT` secret set
-- [x] Label `ralph:start` exists
+- [x] Label `ralph:start` exists *(auto-created by `sync-labels.yml` on first push; or run it manually from Actions → "sync labels" → "Run workflow")*
 - [ ] Branch protection on `main`: require 1 approving review, dismiss stale, require status checks. Auto-merge needs this — without protection, "auto-merge" merges immediately on creation.
 - [ ] Branch protection on `feature/issue-*` (recommended): same rules. This is what gives you the human gate at every stage.
 - [ ] Verify Copilot tier supports the coding agent (Pro / Pro+ / Business / Enterprise — free does not).
@@ -131,11 +131,13 @@ The implementation stage runs Copilot CLI in-runner, which accepts `--model` nat
 ```
 .github/
 ├── ISSUE_TEMPLATE/feature.yml      issue form that feeds the PRD agent
+├── labels.yml                      declarative label config (synced by workflow)
 ├── workflows/
 │   ├── 01-on-label.yml             label → trunk + assign Copilot for PRD
 │   ├── 02-prd-merged.yml           PRD merged → assign Copilot for design
 │   ├── 03-design-merged.yml        design merged → ralph loop for impl
 │   ├── 04-impl-merged.yml          impl merged → trunk → main PR
+│   ├── sync-labels.yml             reconciles repo labels with labels.yml
 │   └── check.yml                   self-CI: actionlint + shellcheck on PRs
 scripts/
 ├── assign-copilot.sh               GraphQL replaceActorsForAssignable wrapper
