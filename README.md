@@ -175,10 +175,10 @@ make test     # run both linters
 
 ## Acknowledgments
 
-- The implementation loop (`src/ralph.bash`) is vendored verbatim from [`exokomodo/im-gonna-ralph`](https://github.com/exokomodo/im-gonna-ralph) (CC0-1.0).
+- The implementation loop (`src/ralph.bash`) is vendored verbatim from [`exokomodo/im-gonna-ralph`](https://github.com/exokomodo/im-gonna-ralph), which is licensed under [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/) (public-domain dedication). Attribution is preserved in the file's header comment.
 - That project credits [Geoffrey Huntley's loop write-up](https://ghuntley.com/loop/) and [this Tavernari gist](https://gist.github.com/Tavernari/01d21584f8d4d8ccea8ceca305656ab3).
 - GitHub Copilot coding agent: [docs](https://docs.github.com/copilot/concepts/agents/coding-agent/about-coding-agent).
 
 ## License
 
-[CC0-1.0](LICENSE), same as the upstream ralph script.
+This project is [Apache 2.0](LICENSE). The vendored `src/ralph.bash` is CC0-1.0 from upstream — CC0 is a public-domain dedication, so it imposes no obligations on this project's licensing; the header comment in that file preserves the attribution.
