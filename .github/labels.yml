@@ -1,0 +1,12 @@
+# Declarative label config. The sync-labels workflow reads this and creates or
+# updates labels in the repo. Edit and push to apply.
+#
+# Schema per label:
+#   - name:        required, the label string (used in workflow triggers)
+#     color:       required, 6-char hex without leading "#"
+#     description: optional, shown on hover
+
+labels:
+  - name: ralph:start
+    color: B60205
+    description: Kick off the Copilot ralphing pipeline (read by 01-on-label.yml)

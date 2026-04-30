@@ -1,0 +1,38 @@
+name: sync labels
+
+# Reconciles the repo's labels with `.github/labels.yml`. Runs:
+#   - automatically when labels.yml or this workflow change on main
+#   - on the first push from a template instantiation (the initial commit
+#     touches both files, which matches the path filter)
+#   - manually via Actions tab → "sync labels" → "Run workflow"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/labels.yml'
+      - '.github/workflows/sync-labels.yml'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply labels.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          count=$(yq '.labels | length' .github/labels.yml)
+          for i in $(seq 0 $(( count - 1 ))); do
+            name=$(yq ".labels[$i].name" .github/labels.yml)
+            color=$(yq ".labels[$i].color" .github/labels.yml)
+            desc=$(yq ".labels[$i].description // \"\"" .github/labels.yml)
+            echo "syncing label: ${name} (#${color})"
+            gh label create "${name}" --color "${color}" --description "${desc}" --force
+          done
