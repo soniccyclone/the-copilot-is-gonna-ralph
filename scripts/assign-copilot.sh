@@ -58,7 +58,7 @@ if [[ -z "${issue_id}" || "${issue_id}" == "null" ]]; then
 fi
 
 copilot_id=$(gh api graphql \
-  -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){suggestedActors(loginNames:["copilot"], capabilities:[CAN_BE_ASSIGNED], first:1){nodes{login ... on Bot {id}}}}}' \
+  -f query='query($o:String!,$r:String!){repository(owner:$o,name:$r){suggestedActors(loginNames:"copilot", capabilities:[CAN_BE_ASSIGNED], first:1){nodes{login ... on Bot {id}}}}}' \
   -F o="${OWNER}" -F r="${REPO}" \
   --jq '.data.repository.suggestedActors.nodes[0].id')
 
