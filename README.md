@@ -2,25 +2,37 @@
 
 GitHub-Actions-driven feature pipeline that turns one labeled issue into three PRs you converse with. Copilot CLI runs in the runner — no cloud-agent assignment plumbing, no org-level enablement, no GraphQL feature flags.
 
-```text
-issue + label `ralph:start`
-   │
-   ▼
-[01-on-label]   create feature/issue-{N} off main; Copilot CLI writes
-                docs/planning/{N}/prd.md on a sub-branch; auto-merge enabled.
-   │
-   ▼   (you review, leave comments, drop "@ralph address the open comments",
-   │   approve, merge to trunk)
-   │
-[02-prd-merged] Copilot CLI writes docs/planning/{N}/design.md; auto-merge.
-   │
-   ▼   (review → @ralph → approve → merge)
-   │
-[03-design-merged]  ralph loop runs on the trunk, implements the design;
-                    when DONE, opens a single PR head=feature/issue-{N},
-                    base=main containing PRD + design + impl; auto-merge.
-   │
-   ▼   (review → @ralph → approve → merge → feature lives in main)
+```mermaid
+flowchart TD
+    issue[/"Issue + <b>ralph:start</b> label"/]
+    main(["main"])
+
+    wf01["<b>01-on-label.yml</b><br/>creates feature/issue-N<br/>Copilot CLI (haiku) writes prd.md"]
+    prdpr[["PRD PR<br/>(prd-branch → trunk)"]]
+    wf02["<b>02-prd-merged.yml</b><br/>Copilot CLI (opus) writes design.md"]
+    designpr[["Design PR<br/>(design-branch → trunk)"]]
+    wf03["<b>03-design-merged.yml</b><br/>ralph loop (sonnet) on trunk"]
+    finalpr[["Final PR<br/>(trunk → main)<br/>contains PRD + design + impl"]]
+
+    issue --> wf01 --> prdpr
+    prdpr ==>|approve + auto-merge| wf02 --> designpr
+    designpr ==>|approve + auto-merge| wf03 --> finalpr
+    finalpr ==>|approve + auto-merge| main
+
+    ralph["<b>04-pr-comment.yml</b><br/>fires on '@ralph address...'<br/>bundles open comments<br/>commits a response"]
+    prdpr -.->|"@ralph address"| ralph
+    designpr -.->|"@ralph address"| ralph
+    finalpr -.->|"@ralph address"| ralph
+    ralph -.->|response commit| prdpr
+    ralph -.->|response commit| designpr
+    ralph -.->|response commit| finalpr
+
+    classDef pr fill:#1f6feb,stroke:#1f6feb,color:#fff
+    classDef wf fill:#0d1117,stroke:#30363d,color:#c9d1d9
+    classDef end_ fill:#238636,stroke:#238636,color:#fff
+    class prdpr,designpr,finalpr pr
+    class wf01,wf02,wf03,ralph wf
+    class main end_
 ```
 
 Three PRs, one issue, one merge to ship. Every PR is a conversation: leave normal review comments, then drop one **`@ralph address the open comments`** when you're done — Copilot bundles up the unresolved feedback and pushes a response to the same branch.
