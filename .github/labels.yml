@@ -9,4 +9,20 @@
 labels:
   - name: ralph:start
     color: B60205
-    description: Kick off the Copilot ralphing pipeline (read by 01-on-label.yml)
+    description: Apply this to an issue to kick off the Copilot ralphing pipeline.
+
+  - name: ralph:pipeline
+    color: 6F42C1
+    description: Auto-applied to PRs the pipeline opens. Required for the @ralph comment loop to act.
+
+  - name: ralph:stage-prd
+    color: FBCA04
+    description: PRD stage PR (haiku-tier work).
+
+  - name: ralph:stage-design
+    color: 0E8A16
+    description: Design doc stage PR (opus-tier work).
+
+  - name: ralph:stage-impl
+    color: 1D76DB
+    description: Implementation stage PR (sonnet-tier ralph loop output).

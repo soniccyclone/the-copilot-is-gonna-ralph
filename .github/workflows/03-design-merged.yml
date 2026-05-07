@@ -1,4 +1,4 @@
-name: 03 — design merged → ralph implementation loop
+name: 03 — design merged → ralph impl → trunk → main
 
 on:
   pull_request:
@@ -19,16 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
-      GH_REPO: ${{ github.repository }}
-      BASE_REF: ${{ github.event.pull_request.base.ref }}
-      IMPL_MODEL: ${{ vars.IMPL_MODEL || 'claude-sonnet-4-6' }}
-      ITERATIONS: ${{ vars.IMPL_ITERATIONS || '15' }}
+      BASE_REF:        ${{ github.event.pull_request.base.ref }}
+      IMPL_MODEL:      ${{ vars.IMPL_MODEL || 'claude-sonnet-4-6' }}
+      IMPL_ITERATIONS: ${{ vars.IMPL_ITERATIONS || '15' }}
     steps:
       - name: Check out feature trunk
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
-          token: ${{ secrets.COPILOT_USER_PAT }}
+          ref:   ${{ github.event.pull_request.base.ref }}
+          token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Parse parent issue number
@@ -37,19 +36,8 @@ jobs:
           n=$(./scripts/parse-issue-number.sh "${BASE_REF}")
           echo "n=${n}" >> "${GITHUB_OUTPUT}"
 
-      - name: Create implementation branch
-        env:
-          PARENT_ISSUE: ${{ steps.parse.outputs.n }}
-        run: |
-          set -euo pipefail
-          git config user.name  "ralph-bot"
-          git config user.email "ralph-bot@users.noreply.github.com"
-          git switch -c "feature/issue-${PARENT_ISSUE}/impl"
-
-      - name: Set up Node + Copilot CLI
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
 
       - name: Install Copilot CLI
         run: npm install -g @github/copilot
@@ -62,45 +50,53 @@ jobs:
           set -euo pipefail
           mkdir -p .ralph
           ./scripts/render-template.sh scripts/prompts/impl-task.md.tmpl > .ralph/tasks
-          echo "::group::Task file"
-          cat .ralph/tasks
-          echo "::endgroup::"
 
       - name: Run ralph loop
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_USER_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
         run: |
           ./src/ralph.bash \
             --file .ralph/tasks \
             --model "${IMPL_MODEL}" \
-            --iterations "${ITERATIONS}" \
+            --iterations "${IMPL_ITERATIONS}" \
             --no-sdd \
             --verbose
 
-      - name: Commit and push implementation
+      - name: Commit impl onto trunk
         env:
           PARENT_ISSUE: ${{ steps.parse.outputs.n }}
         run: |
           set -euo pipefail
-          # Defensive: don't commit ralph's own scratch dir
-          echo ".ralph/" >> .gitignore
+          rm -rf .ralph
           if [[ -z "$(git status --porcelain)" ]]; then
-            echo "error: ralph reported done but produced no changes" >&2
+            echo "ralph reported done but produced no changes" >&2
             exit 1
           fi
-          git add -A ':!.ralph'
-          git commit -m "impl: #${PARENT_ISSUE} (ralph)"
-          git push -u origin "feature/issue-${PARENT_ISSUE}/impl"
+          git config user.name  "ralph-bot"
+          git config user.email "ralph-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "impl: #${PARENT_ISSUE}"
+          git push origin "HEAD:${BASE_REF}"
 
-      - name: Open implementation PR with auto-merge
+      - name: Open trunk → main PR
+        id: pr
         env:
-          GH_TOKEN:     ${{ secrets.COPILOT_USER_PAT }}
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           PARENT_ISSUE: ${{ steps.parse.outputs.n }}
         run: |
           set -euo pipefail
           pr_url=$(gh pr create \
-            --base "feature/issue-${PARENT_ISSUE}" \
-            --head "feature/issue-${PARENT_ISSUE}/impl" \
-            --title "impl: #${PARENT_ISSUE}" \
-            --body  "Implements \`docs/planning/${PARENT_ISSUE}/design.md\` via the ralph loop. Closes #${PARENT_ISSUE}.")
-          gh pr merge "${pr_url}" --auto --squash --delete-branch
+            --base main \
+            --head "${BASE_REF}" \
+            --title "Feature #${PARENT_ISSUE}: complete" \
+            --body "Closes #${PARENT_ISSUE}. Full feature: PRD, design, and implementation (model \`${IMPL_MODEL}\`)." \
+            --label "ralph:pipeline,ralph:stage-impl")
+          pr_num="${pr_url##*/}"
+          echo "number=${pr_num}" >> "${GITHUB_OUTPUT}"
+
+      - name: Enable auto-merge
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.pr.outputs.number }}
+          merge-method: squash
