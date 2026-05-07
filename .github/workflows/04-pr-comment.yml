@@ -1,0 +1,118 @@
+name: 04 — @ralph address (PR feedback loop)
+
+# When you're done leaving review comments on a pipeline-authored PR, drop
+# `@ralph address the open comments` (or any comment beginning with `@ralph`)
+# as a top-level PR comment. This workflow gathers all the unresolved review
+# comments and discussion comments since the last bot push, sends them to
+# Copilot CLI as feedback, and commits one response to the PR branch.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  address:
+    if: >-
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '@ralph') &&
+      contains(github.event.issue.labels.*.name, 'ralph:pipeline')
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.issue.number }}
+      GH_REPO:   ${{ github.repository }}
+    steps:
+      - name: Resolve PR head ref + stage model
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr view "${PR_NUMBER}" --json headRefName,labels)
+          head=$(echo "${pr}" | jq -r '.headRefName')
+          echo "head=${head}" >> "${GITHUB_OUTPUT}"
+
+          # Pick model based on the stage label baked in by stages 01/02/03.
+          stage=$(echo "${pr}" | jq -r '.labels[].name' | grep '^ralph:stage-' | head -n1 || true)
+          case "${stage}" in
+            ralph:stage-prd)    model="${{ vars.PRD_MODEL    || 'claude-haiku-4-5'  }}" ;;
+            ralph:stage-design) model="${{ vars.DESIGN_MODEL || 'claude-opus-4-7'   }}" ;;
+            ralph:stage-impl)   model="${{ vars.IMPL_MODEL   || 'claude-sonnet-4-6' }}" ;;
+            *) echo "no ralph:stage-* label — refusing to act" >&2 ; exit 1 ;;
+          esac
+          echo "model=${model}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref:   ${{ steps.meta.outputs.head }}
+          token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Acknowledge
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${PR_NUMBER}" --body "On it. Gathering open feedback and re-running with model \`${{ steps.meta.outputs.model }}\`."
+
+      - name: Gather feedback bundle
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ralph
+          ./scripts/gather-pr-feedback.sh "${PR_NUMBER}" > /tmp/ralph/feedback.md
+          if [[ ! -s /tmp/ralph/feedback.md ]]; then
+            echo "No actionable feedback found." >&2
+            gh pr comment "${PR_NUMBER}" --body "I didn't find any unresolved review comments or discussion to address. If you want me to do something specific, leave the request as a comment first."
+            exit 0
+          fi
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Build feedback prompt
+        run: |
+          set -euo pipefail
+          {
+            echo "You are addressing review feedback on this PR. The current working tree IS the PR branch, so edit files in place."
+            echo
+            cat /tmp/ralph/feedback.md
+            echo
+            echo "Rules:"
+            echo "- Address every open comment substantively. If a comment doesn't require a code change, leave a follow-up note in your final response, not in code."
+            echo "- Don't refactor unrelated code."
+            echo "- Don't bump dependencies unless a comment specifically asks for it."
+            echo "- Don't run 'git commit' or 'git push' — the workflow handles that."
+          } > /tmp/ralph/full-prompt.md
+
+      - name: Run Copilot CLI to address feedback
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          copilot --allow-all-tools --allow-all-urls \
+            --model "${{ steps.meta.outputs.model }}" \
+            -p "$(cat /tmp/ralph/full-prompt.md)"
+
+      - name: Commit + push feedback response
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name  "ralph-bot"
+          git config user.email "ralph-bot@users.noreply.github.com"
+          if [[ -z "$(git status --porcelain)" ]]; then
+            gh pr comment "${PR_NUMBER}" --body "I read the feedback but didn't see any code changes to make. If you want me to do something specific, please clarify in a new comment."
+            exit 0
+          fi
+          git add -A
+          git commit -m "address review feedback (#${PR_NUMBER})"
+          git push origin "HEAD:${{ steps.meta.outputs.head }}"
+          gh pr comment "${PR_NUMBER}" --body "Pushed a response addressing the open feedback. Re-review when you have a moment."

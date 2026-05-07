@@ -1,170 +1,127 @@
 # the-copilot-is-gonna-ralph
 
-A GitHub-Copilot-native, GitHub-Actions-driven feature pipeline. File an issue, slap a label on it, and Copilot ralphs through the four-stage workflow — PRD, design doc, implementation, merge — with you only signing off on PRs at each gate.
+GitHub-Actions-driven feature pipeline that turns one labeled issue into three PRs you converse with. Copilot CLI runs in the runner — no cloud-agent assignment plumbing, no org-level enablement, no GraphQL feature flags.
 
 ```text
 issue + label `ralph:start`
-        │
-        ▼
-[01-on-label]
-   create branch feature/issue-{N} off main
-   GraphQL assign → Copilot, baseRef=feature/issue-{N},
-       customAgent=$PRD_AGENT (optional), prompt: write
-       docs/planning/{N}/prd.md
-   poll for Copilot's PR → enable auto-merge (squash + delete branch)
-        │ (you approve → auto-merge)
-        ▼
-[02-prd-merged]
-   trigger: PR merged into feature/issue-*, paths=docs/planning/*/prd.md
-   file child issue "Design doc for #N"
-   GraphQL assign → Copilot, baseRef=feature/issue-{N},
-       customAgent=$DESIGN_AGENT (optional), prompt: write design.md
-   enable auto-merge on the resulting PR
-        │ (you approve → auto-merge)
-        ▼
-[03-design-merged]
-   trigger: PR merged, paths=docs/planning/*/design.md
-   checkout feature/issue-{N}, branch feature/issue-{N}/impl
-   npm i -g @github/copilot
-   ./src/ralph.bash --file docs/planning/{N}/design.md
-                    --model $IMPL_MODEL --iterations 15
-   on DONE: push, open PR → feature/issue-{N}, enable auto-merge
-        │ (you approve → auto-merge)
-        ▼
-[04-impl-merged]
-   trigger: PR merged, head=feature/issue-*/impl, base=feature/issue-*
-   open PR feature/issue-{N} → main, enable auto-merge
-        │ (you approve → auto-merge → done)
+   │
+   ▼
+[01-on-label]   create feature/issue-{N} off main; Copilot CLI writes
+                docs/planning/{N}/prd.md on a sub-branch; auto-merge enabled.
+   │
+   ▼   (you review, leave comments, drop "@ralph address the open comments",
+   │   approve, merge to trunk)
+   │
+[02-prd-merged] Copilot CLI writes docs/planning/{N}/design.md; auto-merge.
+   │
+   ▼   (review → @ralph → approve → merge)
+   │
+[03-design-merged]  ralph loop runs on the trunk, implements the design;
+                    when DONE, opens a single PR head=feature/issue-{N},
+                    base=main containing PRD + design + impl; auto-merge.
+   │
+   ▼   (review → @ralph → approve → merge → feature lives in main)
 ```
+
+Three PRs, one issue, one merge to ship. Every PR is a conversation: leave normal review comments, then drop one **`@ralph address the open comments`** when you're done — Copilot bundles up the unresolved feedback and pushes a response to the same branch.
 
 ## Quickstart
 
-1. Use this template (or fork it). The pipeline lives in `.github/workflows/`.
-2. Generate a user PAT and add it as repo secret `COPILOT_USER_PAT`. **See [Generating the user PAT](#generating-the-user-pat) below — this is the part that doesn't work without setup.**
-3. (Optional) Set repo variables for per-stage model pinning. See [Optional: per-stage model pinning](#optional-per-stage-model-pinning).
-4. Create the label `ralph:start` (Issues → Labels → New).
-5. File an issue using the **Feature request** template. Apply the `ralph:start` label.
-6. Approve each PR as it lands. The next stage kicks off automatically.
+1. Use this template (or fork). The pipeline lives in `.github/workflows/`.
+2. **Install requirement**: a Copilot subscription (Pro/Pro+/Business/Enterprise) on the user account whose PAT you'll use. Free Copilot doesn't include CLI access.
+3. Generate a PAT (see [Generating the PAT](#generating-the-pat)) and add it as repo secret `COPILOT_GITHUB_TOKEN`.
+4. Push once. The first push runs `sync-labels.yml`, which auto-creates `ralph:start` and the bookkeeping labels. (Or trigger it manually: Actions → "sync labels" → Run workflow.)
+5. File a feature issue using the template, apply `ralph:start`. The pipeline takes it from there.
 
-## Generating the user PAT
+## Generating the PAT
 
-The cloud Copilot coding agent is **billed per user**, so GitHub doesn't let bots — including the default `GITHUB_TOKEN` and any GitHub App — summon it. The pipeline therefore needs a personal access token that *you* own, stored as a repo secret named `COPILOT_USER_PAT`.
+The Copilot CLI needs a token tied to a user with a Copilot subscription. `GITHUB_TOKEN` (the bot token) is not associated with a user, so it can't authenticate the CLI. PRs opened by `GITHUB_TOKEN` also don't trigger downstream workflows, which would break the stage chain. Both reasons → use a real PAT.
 
-You have two PAT formats to choose from. Fine-grained is preferred (least privilege, expires).
+### Fine-grained PAT (preferred)
 
-### Option A — Fine-grained PAT (preferred)
+1. <https://github.com/settings/personal-access-tokens/new>
+2. **Resource owner**: the user with the Copilot subscription.
+3. **Repository access** → *Only select repositories* → this repo.
+4. **Repository permissions** — set to *Read and write*:
+   - Actions
+   - Contents
+   - Issues
+   - Pull requests
+5. **Account permissions** → *Add permissions* → **Copilot Requests** (Read-only is the only option; that's correct — adding it is what counts).
+6. Generate, copy.
 
-1. Go to <https://github.com/settings/personal-access-tokens/new>.
-2. **Token name**: something obvious, e.g. `ralph-pipeline-<reponame>`.
-3. **Resource owner**: pick the user/org that owns this repo.
-4. **Expiration**: pick the longest your security policy allows (90d is a reasonable default).
-5. **Repository access** → *Only select repositories* → pick this repo.
-6. **Repository permissions** — set these to **Read and write**:
+### Storing it
 
-   | Permission       | Access         | Why                                      |
-   |------------------|----------------|------------------------------------------|
-   | Actions          | Read and write | Trigger downstream workflows             |
-   | Contents         | Read and write | Push branches, commit ralph's output     |
-   | Issues           | Read and write | Assign Copilot, file child issues        |
-   | Pull requests    | Read and write | Open PRs, enable auto-merge              |
-   | Metadata         | Read-only      | (auto-included)                          |
+Repo → Settings → Secrets and variables → Actions → New repository secret → name `COPILOT_GITHUB_TOKEN`, paste the token.
 
-7. **Account permissions** — under *Add permissions*, add **Copilot Requests** (Read-only is the only option):
+## Optional: per-stage model overrides
 
-   | Permission        | Access      | Why                                       |
-   |-------------------|-------------|-------------------------------------------|
-   | Copilot Requests  | Read-only   | Copilot CLI in stage 03 needs this        |
+The CLI takes `--model` natively, so per-stage models are just repo variables:
 
-8. Generate the token. **Copy it immediately** — you won't see it again.
+| Variable          | Default                | Stage |
+|-------------------|------------------------|-------|
+| `PRD_MODEL`       | `claude-haiku-4-5`     | 01    |
+| `DESIGN_MODEL`    | `claude-opus-4-7`      | 02    |
+| `IMPL_MODEL`      | `claude-sonnet-4-6`    | 03    |
+| `IMPL_ITERATIONS` | `15`                   | 03    |
 
-### Option B — Classic PAT (fallback)
+Set them under Settings → Secrets and variables → Actions → Variables. Valid values are whatever your installed `@github/copilot` CLI accepts.
 
-If your org disables fine-grained PATs or you need org-wide scope:
+## The `@ralph` conversation loop
 
-1. Go to <https://github.com/settings/tokens/new> (classic).
-2. Scopes: `repo` (full), `read:org`, `gist`. The Copilot CLI also expects `workflow` if you want it to be able to edit workflow files (probably not needed here).
-3. Generate, copy.
+Each pipeline-authored PR carries the `ralph:pipeline` label. While reviewing, you leave normal GitHub review comments and discussion comments — the bot ignores them. When you've batched up your feedback, drop a top-level PR comment that *starts with* `@ralph` (e.g. `@ralph address the open comments`).
 
-### Storing the PAT
+That fires `04-pr-comment.yml`, which:
 
-1. In this repo, go to **Settings → Secrets and variables → Actions → New repository secret**.
-2. Name: `COPILOT_USER_PAT`. Value: paste the token. Save.
+1. Acknowledges in a comment.
+2. Gathers all unresolved review-thread comments + your discussion comments (excluding bot comments and the `@ralph` trigger itself) into a markdown bundle.
+3. Runs Copilot CLI with the bundle as feedback, on whatever model the PR's stage label dictates.
+4. Pushes the result as a single commit to the PR branch.
+5. Comments back saying "Pushed a response, re-review when ready."
 
-If you're using this template across multiple repos in an org, make it an **organization secret** instead (Org settings → Secrets and variables → Actions) and grant it to the relevant repos.
-
-## Optional: per-stage model pinning
-
-By default the cloud Copilot stages (PRD, design) use the repo's default Copilot model, and the implementation stage uses `claude-sonnet-4-6` via Copilot CLI. To pin specific models per stage you have two knobs:
-
-### For PRD and design (cloud agent stages)
-
-Per-task model selection on the cloud coding agent is only exposed through **custom agents**, which require Copilot Pro+ or Enterprise. If you have one of those:
-
-1. Create three custom agents in your Copilot settings, each pinned to a model:
-   - one on `claude-haiku-4-5` (or similar) — say, slug `prd-haiku`
-   - one on `claude-opus-4-7` — say, slug `design-opus`
-   - the impl stage doesn't need one (it uses CLI directly)
-2. In this repo: **Settings → Secrets and variables → Actions → Variables tab**:
-   - `PRD_AGENT` = `prd-haiku`
-   - `DESIGN_AGENT` = `design-opus`
-
-If these vars are unset, the workflows skip `customAgent` entirely and Copilot uses the repo default. Everything still works, just on whatever the default is.
-
-### For implementation (CLI stage)
-
-The implementation stage runs Copilot CLI in-runner, which accepts `--model` natively without custom agents. To override:
-
-- `IMPL_MODEL` repo variable. Default: `claude-sonnet-4-6`. Valid values are whatever the installed `@github/copilot` CLI accepts.
-- `IMPL_ITERATIONS` repo variable. Default: `15`. Caps how many times ralph loops before failing loud.
+Iterate as needed. When you're satisfied, approve. Auto-merge takes it from there.
 
 ## Repo settings checklist
 
-- [x] `COPILOT_USER_PAT` secret set
-- [x] Label `ralph:start` exists *(auto-created by `sync-labels.yml` on first push; or run it manually from Actions → "sync labels" → "Run workflow")*
-- [ ] Branch protection on `main`: require 1 approving review, dismiss stale, require status checks. Auto-merge needs this — without protection, "auto-merge" merges immediately on creation.
-- [ ] Branch protection on `feature/issue-*` (recommended): same rules. This is what gives you the human gate at every stage.
-- [ ] Verify Copilot tier supports the coding agent (Pro / Pro+ / Business / Enterprise — free does not).
-- [ ] If your org has rulesets that block bot pushes, add `copilot-swe-agent[bot]` to the bypass list — otherwise Copilot can't push to its branch.
+- [x] `COPILOT_GITHUB_TOKEN` secret set
+- [x] Labels exist (`ralph:start` and friends — auto-synced from `.github/labels.yml`)
+- [ ] **Branch protection on `main`**: require 1 approving review. Auto-merge needs this — without protection, "auto-merge" merges immediately on PR creation, which defeats the whole "argue then approve" flow.
+- [ ] Branch protection on `feature/issue-*` (recommended, same rules) so the PRD and design PRs also wait for your approval.
 
 ## How the pieces fit
 
 ```
 .github/
-├── ISSUE_TEMPLATE/feature.yml      issue form that feeds the PRD agent
-├── labels.yml                      declarative label config (synced by workflow)
+├── ISSUE_TEMPLATE/feature.yml      issue form that feeds the PRD prompt
+├── labels.yml                      declarative label config
 ├── workflows/
-│   ├── 01-on-label.yml             label → trunk + assign Copilot for PRD
-│   ├── 02-prd-merged.yml           PRD merged → assign Copilot for design
-│   ├── 03-design-merged.yml        design merged → ralph loop for impl
-│   ├── 04-impl-merged.yml          impl merged → trunk → main PR
-│   ├── sync-labels.yml             reconciles repo labels with labels.yml
+│   ├── 01-on-label.yml             label → trunk + PRD PR
+│   ├── 02-prd-merged.yml           PRD merged → design PR
+│   ├── 03-design-merged.yml        design merged → ralph impl → trunk → main PR
+│   ├── 04-pr-comment.yml           @ralph in a PR comment → CLI addresses open feedback
+│   ├── sync-labels.yml             reconciles labels with .github/labels.yml
 │   └── check.yml                   self-CI: actionlint + shellcheck on PRs
 scripts/
-├── assign-copilot.sh               GraphQL replaceActorsForAssignable wrapper
-├── enable-automerge.sh             poll for Copilot's PR, enable auto-merge
-├── parse-issue-number.sh           pull {N} out of feature/issue-{N}[/...]
-├── render-template.sh              envsubst wrapper for the prompt templates
-└── prompts/
-    ├── prd.md.tmpl
-    ├── design.md.tmpl
-    └── impl-task.md.tmpl
-src/
-└── ralph.bash                      vendored ralph loop (CC0 from exokomodo/im-gonna-ralph)
+├── parse-issue-number.sh           pull {N} from feature/issue-{N}[/...]
+├── render-template.sh              bash-native ${VAR} expander for prompt templates
+├── gather-pr-feedback.sh           bundles unresolved PR comments for the @ralph loop
+└── prompts/{prd,design,impl-task}.md.tmpl
+src/ralph.bash                      vendored ralph loop (CC0 from exokomodo/im-gonna-ralph)
 ```
 
-Each stage's handoff is a path-filtered PR-merged trigger — declarative, crash-safe, re-runnable. The only state between stages is the issue number, which lives in the branch name.
+Stage transitions are path-filtered PR-merged triggers — declarative, crash-safe, re-runnable. The only state between stages is the issue number, encoded in the trunk's branch name.
 
 ## Troubleshooting
 
-**Copilot never opens a PR.** Check Actions logs for stage 01 — most common cause is a PAT scope issue or Copilot tier (free can't use the coding agent). If `assign-copilot.sh` succeeded but no PR appears within 15 min, check Copilot's status page and your org's Copilot settings.
+**Stage 01 fails with "Copilot CLI: not authenticated."** Token doesn't have a Copilot subscription on the user, or the `Copilot Requests` permission is missing on a fine-grained PAT.
 
-**Auto-merge doesn't fire after approval.** Auto-merge requires branch protection that demands at least one approval and/or passing checks. Without protection rules, GitHub merges immediately when auto-merge is enabled (which is probably not what you want), and if no protection rules apply, "auto-merge" can also be a no-op. Set up branch protection on `main` and `feature/issue-*`.
+**Auto-merge doesn't fire after you approve.** Auto-merge requires branch protection that demands at least one approving review. With no protection, GitHub merges immediately at PR creation, or treats auto-merge as a no-op.
 
-**Stage 02 / 03 / 04 doesn't trigger after a merge.** The path-filtered triggers only fire when the PR's diff includes the right path. If a Copilot PR merged but didn't add the expected file (e.g. wrote to the wrong path), the next workflow won't fire. Fix the path in Copilot's PR before merging.
+**Stage 02 / 03 doesn't trigger after a merge.** The path filters only fire when the PR's diff includes the right path. If Copilot wrote the file to the wrong location, fix the path before merging.
 
-**ralph hits the iteration cap without completion.** Stage 03 fails loud at 15 iterations. Read `.ralph/<timestamp>/iteration_*.txt` from the failed run's logs — common causes: design doc was too vague, tests are flaky, environment is missing a dependency. Fix the input and re-run by re-merging the design PR (or push an empty commit to the trunk that touches `docs/planning/{N}/design.md`).
+**`@ralph` comment didn't trigger 04-pr-comment.yml.** The PR must have the `ralph:pipeline` label (auto-applied by stages 01/02/03). If you cherry-picked or hand-created the PR, add the label manually. Also: the comment body must *start with* `@ralph` — anywhere later in the body doesn't count.
 
-**Workflows don't see secrets / vars.** GitHub doesn't expose `secrets` or `vars` to PRs from forks. This pipeline assumes the issue and downstream PRs all live in the canonical repo, which is the standard mode for trunk-based development.
+**ralph hits the iteration cap.** Stage 03 fails loud at `IMPL_ITERATIONS` (default 15). Common causes: the design doc is too vague, tests need a missing dependency, environment differs from local. Inspect the run log, fix the input, and either re-merge the design PR or push an empty commit that touches the design file to retrigger.
 
 ## Development on this template itself
 
@@ -173,14 +130,14 @@ make setup    # install actionlint + shellcheck
 make test     # run both linters
 ```
 
-`check.yml` runs `make test` on PRs into the template's own `main`, so the template stays clean.
+`check.yml` runs `make test` on PRs into the template's own `main`.
 
 ## Acknowledgments
 
-- The implementation loop (`src/ralph.bash`) is vendored verbatim from [`exokomodo/im-gonna-ralph`](https://github.com/exokomodo/im-gonna-ralph), which is licensed under [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/) (public-domain dedication). Attribution is preserved in the file's header comment.
+- The implementation loop (`src/ralph.bash`) is vendored verbatim from [`exokomodo/im-gonna-ralph`](https://github.com/exokomodo/im-gonna-ralph) under [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/). Attribution is preserved in the file's header.
 - That project credits [Geoffrey Huntley's loop write-up](https://ghuntley.com/loop/) and [this Tavernari gist](https://gist.github.com/Tavernari/01d21584f8d4d8ccea8ceca305656ab3).
-- GitHub Copilot coding agent: [docs](https://docs.github.com/copilot/concepts/agents/coding-agent/about-coding-agent).
+- PR creation pattern: [`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request) and [`peter-evans/enable-pull-request-automerge`](https://github.com/peter-evans/enable-pull-request-automerge).
 
 ## License
 
-This project is [Apache 2.0](LICENSE). The vendored `src/ralph.bash` is CC0-1.0 from upstream — CC0 is a public-domain dedication, so it imposes no obligations on this project's licensing; the header comment in that file preserves the attribution.
+This project is [Apache 2.0](LICENSE). The vendored `src/ralph.bash` is CC0-1.0; CC0 imposes no licensing constraints on the including project.
